@@ -9,7 +9,7 @@ dengan Deteksi Api 4 Titik, Fuzzy Mamdani, dan Notifikasi Telegram Berbasis IoT
 
 | | |
 |---|---|
-| **👤 Developer** | [fahrizapro](https://github.com/fahrizapro) |
+| **👤 Developer** |  |
 | **📡 Perangkat** | ESP32-S3 · FreeRTOS Dual-Core · Multi-Device |
 | **🌐 Web** | React + TypeScript + Tailwind · Firebase Hosting |
 | **📊 Database** | Firebase Realtime Database *(region Asia-Southeast1)* |
