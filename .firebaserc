@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "fireguard-ff7c1"
+  },
+  "targets": {
+    "fireguard-ff7c1": {
+      "hosting": {
+        "fireguard": [
+          "fireguard-ff7c1"
+        ],
+        "monitoringkebakaranrumah": [
+          "monitoringkebakaranrumah"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

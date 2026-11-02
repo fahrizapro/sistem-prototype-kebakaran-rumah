@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #0d0a08;
+  color: #e5e7eb;
+}
+
+/* Fire flicker animation */
+@keyframes flame-flicker {
+  0%, 100% { transform: scale(1) rotate(-1deg); opacity: 0.95; }
+  25% { transform: scale(1.08) rotate(2deg); opacity: 1; }
+  50% { transform: scale(0.96) rotate(-2deg); opacity: 0.9; }
+  75% { transform: scale(1.04) rotate(1deg); opacity: 1; }
+}
+.animate-flame {
+  animation: flame-flicker 0.7s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+/* Smoke drift */
+@keyframes smoke-drift {
+  0% { transform: translateY(0) translateX(0) scale(1); opacity: 0; }
+  20% { opacity: 0.6; }
+  100% { transform: translateY(-60px) translateX(12px) scale(1.5); opacity: 0; }
+}
+.animate-smoke {
+  animation: smoke-drift 2.5s ease-out infinite;
+}
+
+/* Danger pulse glow */
+@keyframes danger-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+  50% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
+}
+.animate-danger-pulse {
+  animation: danger-pulse 1.6s ease-out infinite;
+}
+
+/* Warning pulse */
+@keyframes warning-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+}
+.animate-warning-pulse {
+  animation: warning-pulse 1.8s ease-out infinite;
+}
+
+/* Sprinkler water spray */
+@keyframes water-spray {
+  0% { transform: translateY(0) scale(1); opacity: 0.9; }
+  100% { transform: translateY(28px) scale(0.4); opacity: 0; }
+}
+.animate-water {
+  animation: water-spray 0.5s ease-in infinite;
+}
+
+/* Fan spin */
+@keyframes fan-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: fan-spin 1.2s linear infinite;
+}
+.animate-spin-fast {
+  animation: fan-spin 0.6s linear infinite;
+}
+
+/* Soft float */
+@keyframes float-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.animate-float {
+  animation: float-soft 3s ease-in-out infinite;
+}
+
+/* Fade-in-up for cards */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+}
+
+/* Status bar shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #1a130d; }
+::-webkit-scrollbar-thumb { background: #2d2018; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #3d2d20; }
+
+/* Form inputs */
+.input-base {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: #1a130d;
+  border: 1px solid #2d2018;
+  color: #e5e7eb;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input-base:focus {
+  border-color: #f97316;
+}
+.input-base:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

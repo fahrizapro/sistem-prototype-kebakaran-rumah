@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "devices": {
+      ".read": true,
+      ".write": true
+    },
+    "settings": {
+      ".read": true,
+      ".write": true
+    },
+    "events": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
