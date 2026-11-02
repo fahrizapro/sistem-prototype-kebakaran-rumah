@@ -60,13 +60,13 @@ export function SetupScreen({ missing }: { missing: string[] }) {
             <li>Buka <strong>console.firebase.google.com</strong> → proyek Anda</li>
             <li><strong>Build → Realtime Database → Create Database</strong></li>
             <li><strong>Project settings (⚙️) → Your apps → Web app</strong> → salin config</li>
-            <li>Tempel nilainya ke <code className="font-mono">.env</code> (detail lengkap: file <code className="font-mono">FIREBASE_SETUP.md</code>)</li>
+            <li>Tempel nilainya ke <code className="font-mono">.env</code> (detail lengkap: file <code className="font-mono">docs/FIREBASE_SETUP.md</code>)</li>
             <li>Simpan .env → halaman otomatis ter-reload</li>
           </ol>
         )}
 
         <p className="text-[11px] text-slate-500">
-          Panduan lengkap: <code className="font-mono">FIREBASE_SETUP.md</code> di root proyek.
+          Panduan lengkap: <code className="font-mono">docs/FIREBASE_SETUP.md</code>.
         </p>
       </div>
     </div>

@@ -330,7 +330,7 @@ fireguard-ff7c1-default-rtdb/
          severity: "info"|"warning"|"danger", message, created_at}
 ```
 
-> 🛡️ Rules DB saat ini **terbuka** (mode demo/tugas). Panduan penguncian ada di `FIREBASE_SETUP.md` dan README firmware.
+> 🛡️ Rules DB saat ini **terbuka** (mode demo/tugas). Panduan pengunciannya ada di `docs/FIREBASE_SETUP.md` dan README firmware.
 
 ---
 
@@ -339,10 +339,16 @@ fireguard-ff7c1-default-rtdb/
 ```
 📂 sistem-prototype-kebakaran-rumah/
 ├── 📄 README.md                     # Dokumentasi ini
-├── 📄 FIREBASE_SETUP.md             # Panduan setup project Firebase
 ├── 📄 firebase.json                 # Config Hosting (situs: monitoringkebakaranrumah)
 ├── 📄 .firebaserc                   # Aliases target hosting
 ├── 📄 database.rules.json           # Rules RTDB (terbuka — mode demo)
+│
+├── 📂 docs/
+│   ├── 📄 FIREBASE_SETUP.md         # Panduan setup project Firebase
+│   └── 📂 legacy/                   # Arsip (tidak dipakai runtime)
+│       ├── 📂 supabase/             # Skema database versi lama (pra-Firebase)
+│       └── 📂 bolt-scaffold/        # Sisa template generator awal
+│
 ├── 📂 src/                          # Dashboard web
 │   ├── 📄 App.tsx                   # Entry: device selection, tracking online/offline
 │   ├── 📄 main.tsx                  # Bootstrap React
@@ -362,11 +368,13 @@ fireguard-ff7c1-default-rtdb/
 │       ├── 📄 firebase.ts           # Init Firebase dari .env
 │       ├── 📄 db.ts                 # evalFuzzy, evalDanger, helpers RTDB
 │       └── 📄 telegram.ts           # Kirim pesan uji Telegram
+│
 ├── 📂 firmware/
 │   ├── 📄 README.md                 # Wiring, kalibrasi, troubleshooting firmware
 │   └── 📂 fireguard_esp32/
 │       └── 📄 fireguard_esp32.ino   # Firmware utama ESP32-S3 (FreeRTOS dual-core)
-└── 📂 supabase/migrations/          # Arsip skema database versi lama (tidak dipakai)
+│
+└── 📄 (file tooling di root: package.json, vite.config.ts, tsconfig*, eslint, tailwind, postcss, index.html)
 ```
 
 ### 📄 Deskripsi File
@@ -424,7 +432,7 @@ fireguard-ff7c1-default-rtdb/
 ### ✅ Prasyarat
 
 - Node.js ≥ 18, npm
-- Firebase project + Realtime Database aktif (panduan: [FIREBASE_SETUP.md](FIREBASE_SETUP.md))
+- Firebase project + Realtime Database aktif (panduan: [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md))
 - Arduino IDE 2.x + board ESP32-S3 (+ kabel data)
 
 ### 🌐 Menjalankan Dashboard Web
