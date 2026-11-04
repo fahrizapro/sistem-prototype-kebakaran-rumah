@@ -86,12 +86,15 @@
 #define ADC_VREF           3.3f
 
 // =====================================================================
-//  3. KALIBRASI MQ2 / MQ6 (kurva datasheet — sesuaikan dengan modul Anda)
+//  3. KALIBRASI MQ2 / MQ6 — HASIL KALIBRASI SKETCH TERPISAH (2026-11-04)
+//     Model Rs = RL_eff · (Vc−Vout)/Vout, RL_eff = RL_modul ∥ pembagi 20k
+//     Kurva datasheet LPG: ppm = A · (Rs/R0)^B
 // =====================================================================
-#define MQ2_RL   5000.0f   // resistansi beban modul (ohm)
-#define MQ6_RL   5000.0f
-#define MQ2_R0   0.0f      // 0 = auto-kalibrasi saat boot di udara bersih
-#define MQ6_R0   0.0f
+#define MQ2_RL   1818.0f   // RL efektif = modul 202 (2 kΩ) ∥ pembagi 20 kΩ (ohm)
+#define MQ6_RL   952.0f    // RL efektif = modul 102 (1 kΩ) ∥ pembagi 20 kΩ (ohm)
+#define MQ2_R0   1379.0f   // R0 tersimpan dari kalibrasi (kΩ 1.379 → ohm).
+                           // 0 = auto-kalibrasi saat boot di udara bersih
+#define MQ6_R0   1481.0f   // R0 tersimpan dari kalibrasi (kΩ 1.481 → ohm)
 #define MQ2_A    116.60206982f   // ppm = A * (Rs/R0)^B   (kurva LPG MQ2)
 #define MQ2_B    -2.769034857f
 #define MQ6_A    1009.13f        // (kurva LPG MQ6)
@@ -110,7 +113,7 @@
 #define INTERVAL_ACTUATOR_POLL  1000UL
 #define INTERVAL_SETTINGS_POLL  30000UL
 #define INTERVAL_META_POLL      60000UL
-#define TG_COOLDOWN_MS          10000UL   // jeda minimum antar kirim Telegram
+#define TG_COOLDOWN_MS          5000UL   // jeda minimum antar kirim Telegram
 #define DS_CONVERSION_MS        800UL     // waktu konversi DS18B20
 
 #define STACK_KONTROL  8192
@@ -636,17 +639,18 @@ bool fireDetected(int ch, int16_t raw) {
 
 float readMQ(int pin, float RL, float &R0, float A, float B, float cleanRatio,
              float fallbackR0, const char *tag) {
+  // analogReadMilliVolts = hasil kalibrasi pabrik ESP32-S3 — konsisten dengan
+  // sketch kalibrasi (yang mengukur Vadc dengan cara yang sama)
   uint32_t sum = 0;
-  for (int i = 0; i < 10; i++) { sum += analogRead(pin); vTaskDelay(pdMS_TO_TICKS(2)); }
-  float raw = sum / 10.0f;
-  float vAdc = raw * ADC_VREF / ADC_MAX;
+  for (int i = 0; i < 10; i++) { sum += analogReadMilliVolts(pin); vTaskDelay(pdMS_TO_TICKS(2)); }
+  float vAdc = (sum / 10.0f) / 1000.0f;           // tegangan di pin ADC (V)
   float vOut = vAdc * MQ_DIVIDER;                 // tegangan keluaran modul (0..5V)
   if (vOut <= 0.05f) return 0;
   if (vOut > MQ_VC - 0.05f) vOut = MQ_VC - 0.05f; // saturasi
   float rs = RL * (MQ_VC - vOut) / vOut;          // Rs = RL·(Vc−Vout)/Vout
 
-  // Kalibrasi R0: dicoba TERUS sampai berhasil (sensor MQ butuh pemanasan —
-  // saat boot AO masih ≈0V sehingga kalibrasi sekali di setup bisa gagal).
+  // Kalibrasi R0: hanya berjalan bila R0 belum di-set (0).
+  // R0 di MQ2_R0/MQ6_R0 sudah di-hard-code hasil kalibrasi → bagian ini dilewati.
   if (R0 <= 0) {
     if (vOut > 0.3f && vOut < MQ_VC - 0.3f) {
       R0 = rs / cleanRatio;
@@ -664,9 +668,9 @@ float readMQ(int pin, float RL, float &R0, float A, float B, float cleanRatio,
   return constrain(ppm, 0.0f, 10000.0f);
 }
 
-// Tegangan di pin ADC (untuk debug)
+// Tegangan di pin ADC (untuk debug) — pakai analogReadMilliVolts
 float vAdcOf(int pin) {
-  return analogRead(pin) * ADC_VREF / ADC_MAX;
+  return analogReadMilliVolts(pin) / 1000.0f;
 }
 
 void taskKontrol(void *) {

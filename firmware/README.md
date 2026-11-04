@@ -61,11 +61,14 @@ Jika pin I2C Anda bukan 8/9, ubah `I2C_SDA` / `I2C_SCL`.
 
 ## 4. Kalibrasi
 
-- **MQ2/MQ6**: auto-kalibrasi R0 **dicoba terus-menerus** sampai berhasil (sensor MQ
-  butuh pemanasan — saat boot AO masih ≈0V). Setelah berhasil, nilai R0 tercetak
-  di Serial Monitor — catat & hard-code di `MQ2_R0` / `MQ6_R0`. Bila 90 detik
-  tidak berhasil, dipakai nilai fallback 10000Ω. Gunakan `[DBG]` di Serial untuk
-  melihat tegangan mentah ADC & nilai ppm.
+- **MQ2/MQ6**: model kalibrasi memakai **RL efektif = RL modul ∥ pembagi 20 kΩ**
+  (MQ-2: 2 kΩ ∥ 20 kΩ = **1818 Ω**; MQ-6: 1 kΩ ∥ 20 kΩ = **952 Ω** — lihat `MQ2_RL`/`MQ6_RL`).
+  Tegangan ADC dibaca dengan `analogReadMilliVolts` (kalibrasi pabrik, akurat di
+  rentang rendah). **R0 sudah di-hard-code hasil kalibrasi sketch terpisah
+  (2026-11-04): `MQ2_R0 = 1379 Ω`, `MQ6_R0 = 1481 Ω`** — auto-kalibrasi tidak
+  berjalan selama R0 ≠ 0. Untuk kalibrasi ulang: set `MQ2_R0`/`MQ6_R0` kembali
+  ke `0.0f`, boot di udara bersih, catat baris `[CAL]`, hard-code lagi. Bila 90
+  detik tidak berhasil, dipakai nilai fallback 10000Ω. Gunakan `[DBG]` di Serial
 - **Sensor api (ADS1115)**: threshold **otomatis dari baseline** udara bersih
   saat boot (`FIRE_THRESHOLD_AUTO 1`, margin ±2000) — pastikan TIDAK ada api
   saat ESP32 dinyalakan. Baseline & threshold tercetak di Serial; nilai mentah
