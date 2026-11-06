@@ -69,7 +69,7 @@ dengan Deteksi Api 4 Titik, Fuzzy Mamdani, dan Notifikasi Telegram Berbasis IoT
 | 1 | 🧵 **2 Task FreeRTOS** | `taskKontrol` (core 1/APP — sensor + fuzzy + aktuator), `taskKomunikasi` (core 0/PRO — WiFi + RTDB + Telegram), sinkronisasi via mutex + antrean |
 | 2 | 🔥 **Deteksi Api 4 Titik** | Sensor api analog via **ADS1115** 16-bit (±4.096V, 250 SPS) — channel 0–3 |
 | 3 | 🧮 **Fuzzy Mamdani** | 3 input × 3 himpunan × 27 rule, MIN–MAX, defuzzifikasi diskrit → kipas FLOW/BOOST — **identik dengan `evalFuzzy()` web** |
-| 4 | ⏱️ **Trigger Keras Api** | Sparinkler titik i menyala setelah `sprinkler_delay`, kipas BOOST setelah `fan_delay`, bertahan `fan_duration` setelah pemicu hilang |
+| 4 | ⏱️ **Trigger Keras Api** | Api di titik i → sprinkler i & kipas BOOST **langsung aktif** (sama cepat dengan buzzer, tanpa delay); bertahan `fan_duration` setelah pemicu hilang |
 | 5 | 🎚️ **Auto-Baseline Sensor Api** | Threshold otomatis dari udara bersih saat boot (`FIRE_THRESHOLD_AUTO`), margin ±2000 counts |
 | 6 | 🧪 **Kalibrasi MQ Otomatis** | Kurva datasheet LPG + auto-R0 saat boot (timeout 90 dtk, fallback R0 = 10 kΩ) |
 | 7 | 🔔 **Buzzer Denyut** | Buzzer berdenyut 500 ms on/off saat BAHAYA (driver BC548, active-HIGH) |
@@ -252,7 +252,7 @@ stateDiagram-v2
         [*] --> Fuzzy
         Fuzzy --> Kipas_FLOW : hasil fuzzy = FLOW<br/> (relay OFF)
         Fuzzy --> Kipas_BOOST : hasil fuzzy = BOOST<br/> (relay ON)
-        Fuzzy --> Spr_ON : api i latched<br/>+ delay terpenuhi
+        Fuzzy --> Spr_ON : hasil fuzzy BAHAYA<br/>+ delay terpenuhi
         Fuzzy --> Spr_OFF : tak ada pemicu
     }
 
@@ -297,8 +297,8 @@ fireguard-ff7c1-default-rtdb/
 │   ├── temp_threshold: 50
 │   ├── smoke_threshold: 1000
 │   ├── gas_threshold: 2000
-│   ├── sprinkler_delay: 3        # detik, per titik api
-│   ├── fan_delay: 2              # detik, delay kipas BOOST
+│   ├── sprinkler_delay: 3        # detik, jeda jalur fuzzy (api keras → langsung)
+│   ├── fan_delay: 2              # detik, jeda jalur fuzzy (api keras → langsung)
 │   ├── fan_duration: 30          # detik, durasi BOOST setelah pemicu hilang
 │   ├── fuzzy_temp_aman / fuzzy_temp_bahaya: 35 / 55
 │   ├── fuzzy_smoke_rendah / fuzzy_smoke_tinggi: 400 / 600
@@ -496,7 +496,7 @@ Task Kontrol & Komunikasi berjalan ✔
 |-------|----------------------|---------|
 | 🟢 **AMAN** (0) | semua di bawah ambang | kipas FLOW (idle), sprinkler OFF |
 | 🟡 **WASPADA** (1) | suhu ≥ **0.75 ×** ambang, asap ≥ **0.5 ×** ambang, gas ≥ **0.5 ×** ambang | kipas mengikuti fuzzy, buzzer beep kilat |
-| 🔴 **BAHAYA** (2) | api terdeteksi di titik mana pun, suhu ≥ ambang, asap ≥ ambang, gas ≥ ambang | sprinkler delay aktif, kipas BOOST, buzzer denyut, Telegram + event log, **aktuator manual dipaksa AUTO** |
+| 🔴 **BAHAYA** (2) | api terdeteksi di titik mana pun, suhu ≥ ambang, asap ≥ ambang, gas ≥ ambang | sprinkler titik terkait **langsung ON**, kipas **BOOST langsung**, buzzer denyut, Telegram + event log, **aktuator manual dipaksa AUTO** |
 
 ### 🎯 Ambang Default
 
@@ -505,8 +505,8 @@ Task Kontrol & Komunikasi berjalan ✔
 | 🌡️ Suhu BAHAYA | **50 °C** | trigger keras + WASPADA pada 37.5 °C |
 | 💨 Asap BAHAYA (MQ-2) | **1000 ppm** | trigger keras + WASPADA pada 500 ppm |
 | 🧪 Gas BAHAYA (MQ-6) | **2000 ppm** | trigger keras + WASPADA pada 1000 ppm |
-| ⏱️ Delay sprinkler | **3 s** (per titik) | dari api pertama latched di titik tsb |
-| ⏱️ Delay kipas | **2 s** | BOOST keras saat api |
+| ⏱️ Delay sprinkler | **3 s** (per titik) | hanya jalur fuzzy (asap/gas); api keras → **langsung ON** |
+| ⏱️ Delay kipas | **2 s** | hanya jalur fuzzy; api keras → **BOOST langsung** |
 | ⏱️ Durasi kipas | **30 s** | durasi BOOST setelah pemicu hilang |
 
 ### 🧮 Fuzzy Mamdani (kipas)

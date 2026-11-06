@@ -678,10 +678,9 @@ void taskKontrol(void *) {
   int lastLevel = -1;
   uint32_t warnBeepUntil = 0;
 
-  bool fireLatched[4] = { false, false, false, false };
-  uint32_t fireSince[4] = { 0, 0, 0, 0 };
-
   bool boostActive = false;
+  uint32_t boostCondSince = 0, boostCondEnded = 0;
+  uint32_t fzSprSince = 0;         // jeda jalur fuzzy untuk sprinkler
   uint32_t boostCondSince = 0, boostCondEnded = 0;
 
   for (;;) {
@@ -775,22 +774,34 @@ void taskKontrol(void *) {
     if (millis() - tApply >= 100) {
       tApply = millis();
 
-      // sprinkler 1-4: trigger keras api (dengan delay) ATAU perintah fuzzy
+      // sprinkler 1-4:
+      //  - Api keras di titik i → sprinkler i ON LANGSUNG (tanpa delay; sama
+      //    cepat dengan buzzer). Delay sprinkler hanya membatasi jalur fuzzy.
+      //  - Tanpa api (hanya asap/gas tinggi) → ikut hasil fuzzy (dengan jeda
+      //    sprinkler_delay dari Pengaturan; 0 = langsung).
+      bool fuzzySprOn = false;
+      if (fuzzySpr) {
+        if (fzSprSince == 0) fzSprSince = millis();
+        if (s.sprinkler_delay == 0 ||
+            millis() - fzSprSince >= (uint32_t)s.sprinkler_delay * 1000UL) fuzzySprOn = true;
+      } else {
+        fzSprSince = 0;
+      }
       for (int i = 0; i < 4; i++) {
-        if (d.fire[i] && !fireLatched[i]) { fireLatched[i] = true; fireSince[i] = millis(); }
-        if (!d.fire[i]) fireLatched[i] = false;
-
-        bool afterDelay = d.fire[i] && fireLatched[i] &&
-                          (millis() - fireSince[i] >= (uint32_t)s.sprinkler_delay * 1000UL);
-        bool on = c.sprAuto[i] ? (afterDelay || fuzzySpr) : c.sprManual[i];
+        bool on = c.sprAuto[i] ? (d.fire[i] || fuzzySprOn) : c.sprManual[i];
         int pin = (i == 0) ? PIN_RELAY_SPR1 : (i == 1) ? PIN_RELAY_SPR2 :
                   (i == 2) ? PIN_RELAY_SPR3 : PIN_RELAY_SPR4;
         relayWrite(pin, on);
       }
 
-      // kipas: FLOW / BOOST dengan fan_delay & fan_duration
-      bool boostCond = fireAny || (fuzzyFan == 2);
-      if (boostCond) {
+      // kipas: api keras → BOOST LANGSUNG (tanpa fan_delay);
+      // kondisi fuzzy saja (asap/gas tinggi) tetap menghormati fan_delay.
+      // fan_duration tetap berlaku: durasi BOOST setelah semua pemicu hilang.
+      if (fireAny) {
+        boostActive = true;
+        boostCondSince = 0;
+        boostCondEnded = 0;
+      } else if (fuzzyFan == 2) {
         if (boostCondSince == 0) boostCondSince = millis();
         if (millis() - boostCondSince >= (uint32_t)s.fan_delay * 1000UL) {
           boostActive = true;

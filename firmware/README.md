@@ -87,9 +87,11 @@ Jika pin I2C Anda bukan 8/9, ubah `I2C_SDA` / `I2C_SCL`.
 - **Fuzzy Mamdani** identik dengan web (`evalFuzzy` di `src/lib/db.ts`):
   3 input (suhu/asap/gas), 27 rule, MIN–MAX, defuzzifikasi diskrit →
   kipas **FLOW** / **BOOST**, sprinkler ON saat rule BAHAYA menyala.
-- **Trigger keras:** api i (via ADS1115) → sprinkler i ON setelah
-  `sprinkler_delay` + kipas BOOST setelah `fan_delay`, bertahan `fan_duration`
-  setelah pemicu hilang. Buzzer ON saat BAHAYA.
+- **Trigger keras:** api i (via ADS1115) → sprinkler i **ON LANGSUNG** dan
+  kipas **BOOST LANGSUNG** (tanpa delay — sama cepat dengan buzzer).
+  Slider `sprinkler_delay` / `fan_delay` hanya membatasi **jalur fuzzy**
+  (asap/gas tinggi tanpa api; 0 = langsung). `fan_duration` tetap tahanan
+  BOOST setelah semua pemicu hilang. Buzzer ON denyut saat BERBAHAYA.
 - **Perintah web:** mode `manual` + `manual_active` menimpa perilaku auto.
   Kipas manual punya dua level: `manual_level: "flow"` (pelan, relay off) dan
   `"boost"` (kencang, relay on). Auto tetap berjalan fuzzy: FLOW = relay off,
