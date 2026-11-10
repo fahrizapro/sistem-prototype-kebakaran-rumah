@@ -1134,22 +1134,39 @@ void setup() {
   }
 
   // ---- OLED SSD1306 (bus I2C kedua, terpisah dari ADS1115) ----
+  // 1) scan seluruh bus: cari perangkat di 1..0x7E (baik untuk diagnosa
+  //    wiring lepas / alamat salah), 2) coba init di alamat ketemu,
+  //    3) bila gagal di 400 kHz coba ulang di 100 kHz (modul murah).
   Wire1.begin(PIN_OLED_SDA, PIN_OLED_SCL);
-  Wire1.setClock(400000UL);
-  if (lcd.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    lcdOk = true;
-    lcd.clearDisplay();
-    lcd.setTextColor(SSD1306_WHITE);
-    lcd.display();
-    lcdInfo.name = DEVICE_ID;       // default s/d meta/name dari RTDB masuk.
+  uint8_t addrFound = 0;
+  for (uint8_t a = 1; a < 0x7E; a++) {
+    Wire1.beginTransmission(a);
+    if (Wire1.endTransmission() == 0) {
+      Serial.printf("[LCD] I2C scan: perangkat di 0x%02X\n", a);
+      if (a == OLED_ADDR || a == 0x3D) addrFound = a;
+    }
+  }
+  if (addrFound == 0)
+    Serial.println("[LCD] I2C scan: TIDAK ADA perangkat di bus (cek SDA=6, SCL=7, VCC, GND)");
+  const uint32_t lcdClocks[2] = { 400000UL, 100000UL };
+  for (uint8_t c = 0; c < 2 && !lcdOk; c++) {
+    Wire1.setClock(lcdClocks[c]);
+    if (lcd.begin(SSD1306_SWITCHCAPVCC, addrFound ? addrFound : OLED_ADDR)) {
+      lcdOk = true;
+      lcd.clearDisplay();
+      lcd.setTextColor(SSD1306_WHITE);
+      lcd.display();
+      lcdInfo.name = DEVICE_ID;     // default s/d meta/name dari RTDB masuk.
                                     // (tanpa mutex: task lain belum berjalan;
                                     //  lcdMx dibuat di blok RTOS di bawah)
-    Serial.printf("[LCD] SSD1306 siap (0x%02X, SDA=%d SCL=%d)\n",
-                  OLED_ADDR, PIN_OLED_SDA, PIN_OLED_SCL);
-  } else {
-    Serial.printf("[LCD] SSD1306 TIDAK TERDETEKSI di 0x%02X — layar dipaksa mati, "
-                  "sistem tetap jalan. Coba alamat 0x3D.\n", OLED_ADDR);
+      Serial.printf("[LCD] SSD1306 siap (0x%02X, SDA=%d SCL=%d, %lu Hz)\n",
+                    addrFound ? addrFound : OLED_ADDR, PIN_OLED_SDA, PIN_OLED_SCL,
+                    (unsigned long)lcdClocks[c]);
+    }
   }
+  if (!lcdOk)
+    Serial.println("[LCD] SSD1306 GAGAL init — layar dipaksa mati, sistem tetap jalan. "
+                   "Cek hasil [LCD] I2C scan di atas.");
   ds.begin();
   ds.setWaitForConversion(false);   // asinkron: request → tunggu → baca (tidak blocking)
   if (ds.getDeviceCount() > 0) {
