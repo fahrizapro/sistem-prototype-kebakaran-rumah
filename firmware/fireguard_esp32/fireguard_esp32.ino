@@ -134,6 +134,8 @@ void publishLcdWifi(bool ok);
 #define INTERVAL_ACTUATOR_POLL  1000UL
 #define INTERVAL_SETTINGS_POLL  30000UL
 #define INTERVAL_META_POLL      60000UL
+#define INTERVAL_DEVICES_POLL   5000UL   // /devices.json → layar semua rumah
+#define ONLINE_WINDOW_MS        15000UL  // sama dengan web (App.tsx)
 #define TG_COOLDOWN_MS          5000UL   // jeda minimum antar kirim Telegram
 #define DS_CONVERSION_MS        800UL     // waktu konversi DS18B20
 
@@ -221,14 +223,26 @@ SemaphoreHandle_t i2cMx;         // serialisasi bus Wire (ADS1115 ↔ OLED)
 //  fungsi pertama file ini — bila struct di bawah, compile error
 //  "'LcdInfo' does not name a type".
 // =====================================================================
+// Kartu 1 rumah: diri sendiri diisi taskKontrol (publishLcdData),
+// perangkat LAIN diisi taskKomunikasi (pollDevices, dari /devices.json).
+struct LcdDev {
+  String name;                           // "Rumah B" (meta RTDB) atau DEVICE_ID
+  int    level;                          // 0 = AMAN, 2 = BAHAYA (threshold web)
+  bool   online;                         // updated_at < 15 dtk
+  bool   fire[4];
+  String reasons;                        // kata "Suhu"/"Asap"/"Gas" (keyword)
+};
+
 struct LcdInfo {
   bool   wifiOk;                         // WiFi tersambung
   bool   everWifi;                       // pernah tersambung
   String ip;                             // IP saat tersambung
-  String name;                           // "Rumah A/B" (meta RTDB) atau DEVICE_ID
+  String name;                           // rumah DOMAIN sendiri ("Rumah A")
   int    level;                          // 0 = AMAN, 1 = WASPADA, 2 = BAHAYA
   bool   fire[4];
-  String reasons;                        // alasan level dari taskKontrol
+  String reasons;                        // alasan level rumah sendiri
+  LcdDev others[3];                      // rumah lain (maks 3)
+  uint8_t nOthers;                       // jumlah rumah lain terbaca
 };
 
 #define MAX_RECIPIENTS 8
@@ -589,8 +603,81 @@ void resetActuatorsAuto() {
   Serial.println("[KOM] BAHAYA — semua aktuator dikembalikan ke mode AUTO");
 }
 
+// =====================================================================
+//  Status RUMAH LAIN untuk OLED — baca /devices.json tiap
+//  INTERVAL_DEVICES_POLL. Rumah sendiri diurus taskKontrol.
+//  Online & level dihitung dengan aturan yang sama dengan web
+//  (updated_at < 15 dtk; threshold settings temp/smoke/gas).
+// =====================================================================
+// ISO-8601 "YYYY-MM-DDTHH:MM:SS..." → epoch detik (0 = gagal)
+time_t isoToEpoch(const String &s) {
+  if (s.length() < 19) return 0;
+  struct tm t = {};
+  t.tm_year = s.substring(0,  4).toInt() - 1900;
+  t.tm_mon  = s.substring(5,  7).toInt() - 1;
+  t.tm_mday = s.substring(8, 10).toInt();
+  t.tm_hour = s.substring(11, 13).toInt();
+  t.tm_min  = s.substring(14, 16).toInt();
+  t.tm_sec  = s.substring(17, 19).toInt();
+  t.tm_isdst = 0;
+  time_t e = mktime(&t);              // TZ hasil configTime = UTC
+  return (e < 0) ? 0 : e;
+}
+
+void pollDevices() {
+  String body;
+  if (!rtdbGet("/devices.json", body) || body == "null") return;
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) return;
+
+  Settings s;                          // snapshot threshold (sama dgn evalLevel web)
+  xSemaphoreTake(dataMx, portMAX_DELAY);
+  s = S;
+  xSemaphoreGive(dataMx);
+
+  time_t nowT = time(nullptr);
+  LcdDev tmp[3]; uint8_t n = 0;
+
+  JsonObject root = doc.as<JsonObject>();
+  for (JsonPair kv : root) {
+    if (n >= 3) break;
+    if (strcmp(kv.key().c_str(), DEVICE_ID) == 0) continue;   // diri sendiri
+
+    LcdDev d;                          // String ctor default; POD di-zero-init static
+    d.name = String(kv.key().c_str());
+    JsonObject src = kv.value().as<JsonObject>();
+    if (src.isNull()) { tmp[n++] = d; continue; }             // belum ada apa2 → OFFLINE
+
+    d.name = src["meta"]["name"] | String(kv.key().c_str());
+    JsonObject st = src["status"].as<JsonObject>();
+    if (st.isNull()) { tmp[n++] = d; continue; }              // belum pernah kirim status
+
+    time_t ua = isoToEpoch(st["updated_at"] | "");
+    bool online = ua > 0 && nowT >= ua &&
+                  (uint32_t)(nowT - ua) <= (ONLINE_WINDOW_MS / 1000);
+    if (!online) { tmp[n++] = d; continue; }                  // offline → tampil OFFLINE
+
+    int level = 0;
+    String reasons = "";
+    for (int i = 1; i <= 4; i++) {
+      if (st[String("fire") + i] | false) { d.fire[i - 1] = true; level = 2; }
+    }
+    if ((st["temperature"] | 0.0f) >= s.temp_threshold) { level = 2; reasons += "Suhu "; }
+    if ((st["smoke_mq2"]   | 0  ) >= s.smoke_threshold) { level = 2; reasons += "Asap "; }
+    if ((st["gas_mq6"]     | 0  ) >= s.gas_threshold)   { level = 2; reasons += "Gas "; }
+
+    d.online = true; d.level = level; d.reasons = reasons;
+    tmp[n++] = d;
+  }
+
+  xSemaphoreTake(lcdMx, portMAX_DELAY);
+  lcdInfo.nOthers = n;
+  for (uint8_t i = 0; i < n; i++) lcdInfo.others[i] = tmp[i];
+  xSemaphoreGive(lcdMx);
+}
+
 void taskKomunikasi(void *) {
-  uint32_t tStatus = 0, tAct = 0, tSet = 0, tMeta = 0;
+  uint32_t tStatus = 0, tAct = 0, tSet = 0, tMeta = 0, tDev = 0;
   static uint32_t tWifi = 0;
 
   for (;;) {
@@ -608,6 +695,7 @@ void taskKomunikasi(void *) {
       if (millis() - tAct   >= INTERVAL_ACTUATOR_POLL)  { tAct = millis();    pollActuators(); }
       if (millis() - tSet   >= INTERVAL_SETTINGS_POLL)  { tSet = millis();    pollSettings(); }
       if (millis() - tMeta  >= INTERVAL_META_POLL)      { tMeta = millis();   pollMeta(); }
+      if (millis() - tDev   >= INTERVAL_DEVICES_POLL)   { tDev  = millis();   pollDevices(); }
     } else {
       publishLcdWifi(false);          // OLED: kembali ke animasi koneksi
     }
@@ -926,7 +1014,7 @@ void taskKontrol(void *) {
 Adafruit_SSD1306 lcd(128, 32, &Wire, -1);
 bool lcdOk = false;
 
-LcdInfo lcdInfo = { false, false, "", "", 0, { false, false, false, false }, "" };
+LcdInfo lcdInfo;                                    // static → POD member zero-init
 SemaphoreHandle_t lcdMx;
 
 void publishLcdWifi(bool ok) {
@@ -1015,16 +1103,20 @@ void drawReasonLine(const String &s, int y) {
   lcd.setFont();
 }
 
-// Susun daftar singkat jenis-letak bahaya (maks 3 entri, urut prioritas)
-void buildReasonList(const LcdInfo &inf, String out[3], uint8_t &n) {
+// Susun daftar singkat jenis-letak bahaya dari SATU kartu rumah:
+// entri-0 = nama rumah itu sendiri (muncul bergantian di layar), lalu
+// api (letak titik) dan suhu/asap/gas dari keyword di reasons.
+void buildReasonList(const String &name, const bool *fire, const String &reasons,
+                     String out[5], uint8_t &n) {
   n = 0;
+  if (name.length()) out[n++] = name;
   String f;                                          // api → letak (titik)
   for (int i = 0; i < 4; i++)
-    if (inf.fire[i]) f += String(f.length() ? ", " : "") + String(i + 1);
+    if (fire[i]) f += String(f.length() ? ", " : "") + String(i + 1);
   if (f.length()) out[n++] = "API TITIK " + f;
-  if (inf.reasons.indexOf("Suhu") >= 0)  out[n++] = "SUHU TINGGI";
-  if (inf.reasons.indexOf("Asap") >= 0)  out[n++] = "ASAP TINGGI";
-  if (inf.reasons.indexOf("Gas")  >= 0)  out[n++] = "GAS TINGGI";
+  if (reasons.indexOf("Suhu") >= 0)  out[n++] = "SUHU TINGGI";
+  if (reasons.indexOf("Asap") >= 0)  out[n++] = "ASAP TINGGI";
+  if (reasons.indexOf("Gas")  >= 0)  out[n++] = "GAS TINGGI";
 }
 
 // ---------- layar-layar ----------
@@ -1077,28 +1169,48 @@ void drawMainScreen(const LcdInfo &inf) {
   lcd.clearDisplay();
   lcd.setTextColor(SSD1306_WHITE);
 
-  if (inf.level <= 0) {
-    // AMAN: nama rumah (9pt) + ikon wifi kecil, lalu "AMAN" besar
-    lcd.setFont(&FreeSansBold9pt7b);
-    lcd.setCursor(2, 12); lcd.print(inf.name);
-    lcd.setFont();
-    drawWifiArc(121, 12, 3, 2, 3);                   // sinyal kecil kanan-atas
-    drawBigStatus("AMAN", 31);
-  } else {
-    // jenis & letak — bergantian bila ada beberapa sebab (1.2 dtk / entri)
-    String list[3]; uint8_t n;
-    buildReasonList(inf, list, n);
-    const String &r = list[(millis() / 1200) % max(n, (uint8_t)1)];
-    drawReasonLine(r, 12);
+  // Kartu rumah: 0 = diri sendiri, 1..nOthers = rumah lain (si RTDB)
+  const String *nm[4]; const bool *fr[4]; const String *rs[4];
+  int lv[4]; bool on[4];
+  nm[0] = &inf.name; fr[0] = inf.fire; rs[0] = &inf.reasons;
+  lv[0] = inf.level; on[0] = true;                   // diri sendiri selalu "on"
+  for (uint8_t i = 0; i < inf.nOthers; i++) {
+    nm[i + 1] = &inf.others[i].name;
+    fr[i + 1] = inf.others[i].fire;
+    rs[i + 1] = &inf.others[i].reasons;
+    lv[i + 1] = inf.others[i].level;
+    on[i + 1] = inf.others[i].online;
+  }
+  uint8_t nCard = 1 + inf.nOthers;
 
-    bool hasFire = list[0].startsWith("API");
-    if (inf.level >= 2) {
-      drawBigStatus("BAHAYA", 31);
-      if (hasFire) drawFlame(118, 31, frame);        // animasi api (kanan-bawah)
-      else         drawSmoke(118, 31, frame);        // animasi asap naik
-    } else {
+  // Prioritas: kartu BAHAYA mana pun → satu layar penuh (sebabnya gantian)
+  int dangerSel = -1;
+  for (uint8_t i = 0; i < nCard; i++)
+    if (lv[i] >= 2) { dangerSel = i; break; }
+
+  if (dangerSel >= 0) {
+    String list[5]; uint8_t n;
+    buildReasonList(*nm[dangerSel], fr[dangerSel], *rs[dangerSel], list, n);
+    // entri bergantian 1,2 dtk: "Rumah B" → "API TITIK 2" → ...
+    const String &e = list[(millis() / 1200) % max(n, (uint8_t)1)];
+    drawReasonLine(e, 12);
+    drawBigStatus("BAHAYA", 31);
+    bool hasFire = false;
+    for (uint8_t j = 0; j < n && !hasFire; j++) hasFire = list[j].startsWith("API");
+    if (hasFire) drawFlame(118, 31, frame);          // animasi api (kanan-bawah)
+    else         drawSmoke(118, 31, frame);          // animasi asap naik
+  } else {
+    // Tidak ada bahaya → rumah bergantian tampil tiap 3 dtk
+    uint8_t sel = (millis() / 3000) % nCard;
+    drawReasonLine(*nm[sel], 12);
+    if (!on[sel]) {
+      drawBigStatus("OFFLINE", 31);                  // rumah itu tidak mengirim >15 dtk
+    } else if (lv[sel] >= 1) {
       if ((millis() / 600) & 1) drawBigStatus("WASPADA", 31);  // berkedip lambat
       drawSmoke(118, 31, frame);
+    } else {
+      drawWifiArc(121, 12, 3, 2, 3);                 // sinyal kecil kanan-atas
+      drawBigStatus("AMAN", 31);
     }
   }
   lcdShow();
