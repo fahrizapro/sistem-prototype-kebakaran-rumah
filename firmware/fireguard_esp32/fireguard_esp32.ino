@@ -216,6 +216,8 @@ uint32_t lastTgSend = (uint32_t)-TG_COOLDOWN_MS;  // kirim pertama langsung bole
 
 SemaphoreHandle_t i2cMx;         // serialisasi bus Wire (ADS1115 ↔ OLED)
 SemaphoreHandle_t lcdMx;         // melindungi struct LcdInfo (data layar OLED)
+LcdInfo lcdInfo;                 // data layar OLED — static → POD zero-init.
+                                 // HARUS di sini (sebelum pollDevices yang memakai)
 
 // =====================================================================
 //  LcdInfo — data tampilan OLED (dipakai taskLayar di bawah)
@@ -1015,7 +1017,7 @@ void taskKontrol(void *) {
 Adafruit_SSD1306 lcd(128, 32, &Wire, -1);
 bool lcdOk = false;
 
-LcdInfo lcdInfo;                                    // static → POD member zero-init
+// (Deklarasi lcdInfo ada di blok state atas — sebelum pollDevices.)
 
 void publishLcdWifi(bool ok) {
   if (!lcdOk) return;
