@@ -69,7 +69,7 @@ dengan Deteksi Api 4 Titik, Fuzzy Mamdani, dan Notifikasi Telegram Berbasis IoT
 | 1 | 🧵 **3 Task FreeRTOS** | `taskKontrol` (core 1/APP — sensor + fuzzy + aktuator), `taskKomunikasi` (core 0/PRO — WiFi + RTDB + Telegram), `taskLayar` (core 0, prioritas 1 — OLED SSD1306), sinkronisasi via mutex + antrean |
 | 2 | 🔥 **Deteksi Api 4 Titik** | Sensor api analog via **ADS1115** 16-bit (±4.096V, 250 SPS) — channel 0–3 |
 | 3 | 🧮 **Fuzzy Mamdani** | 3 input × 3 himpunan × 27 rule, MIN–MAX, defuzzifikasi diskrit → kipas FLOW/BOOST — **identik dengan `evalFuzzy()` web** |
-| 4 | ⏱️ **Trigger Keras Api** | Api di titik i → sprinkler i & kipas BOOST **langsung aktif** (sama cepat dengan buzzer, tanpa delay); bertahan `fan_duration` setelah pemicu hilang |
+| 4 | ⏱️ **Trigger Keras Api & Gas** | Api di titik i → sprinkler i & kipas BOOST **langsung aktif**; gas ≥ threshold → kipas BOOST **langsung** (tanpa delay); slider delay hanya jalur fuzzy asap; bertahan `fan_duration` setelah pemicu hilang |
 | 5 | 🎚️ **Auto-Baseline Sensor Api** | Threshold otomatis dari udara bersih saat boot (`FIRE_THRESHOLD_AUTO`), margin ±2000 counts |
 | 6 | 🧪 **Kalibrasi MQ Otomatis** | Kurva datasheet LPG + auto-R0 saat boot (timeout 90 dtk, fallback R0 = 10 kΩ) |
 | 7 | 🔔 **Buzzer Denyut** | Buzzer berdenyut 500 ms on/off saat BAHAYA (driver BC548, active-HIGH) |
@@ -511,7 +511,7 @@ Task Kontrol & Komunikasi berjalan ✔
 | 💨 Asap BAHAYA (MQ-2) | **1000 ppm** | trigger keras + WASPADA pada 500 ppm |
 | 🧪 Gas BAHAYA (MQ-6) | **2000 ppm** | trigger keras + WASPADA pada 1000 ppm |
 | ⏱️ Delay sprinkler | **3 s** (per titik) | hanya jalur fuzzy (asap/gas); api keras → **langsung ON** |
-| ⏱️ Delay kipas | **2 s** | hanya jalur fuzzy; api keras → **BOOST langsung** |
+| ⏱️ Delay kipas | **2 s** | hanya jalur fuzzy asap; api/gas keras → **BOOST langsung** |
 | ⏱️ Durasi kipas | **30 s** | durasi BOOST setelah pemicu hilang |
 
 ### 🧮 Fuzzy Mamdani (kipas)

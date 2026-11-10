@@ -129,14 +129,15 @@ void publishLcdWifi(bool ok);
 // =====================================================================
 //  4. INTERVAL (ms) & RTOS
 // =====================================================================
-#define INTERVAL_SENSOR_READ    1000UL
-#define INTERVAL_STATUS_PUSH    1000UL   // 1 detik → web terasa realtime
-#define INTERVAL_ACTUATOR_POLL  1000UL
+#define INTERVAL_SENSOR_READ    500UL    // MQ + ADS tiap 500 ms (web lebih hidup)
+#define INTERVAL_STATUS_PUSH    500UL    // push tiap 500 ms → web terasa realtime
+#define INTERVAL_ACTUATOR_POLL  500UL    // perintah web diterapkan ≤ 0,5 dtk
 #define INTERVAL_SETTINGS_POLL  30000UL
 #define INTERVAL_META_POLL      60000UL
 #define INTERVAL_DEVICES_POLL   5000UL   // /devices.json → layar semua rumah
 #define ONLINE_WINDOW_MS        15000UL  // sama dengan web (App.tsx)
-#define TG_COOLDOWN_MS          5000UL   // jeda minimum antar kirim Telegram
+#define INTERVAL_DS_READ        1000UL   // DS18B20: konversi 800 ms → tetap 1 dtk
+#define TG_COOLDOWN_MS          2000UL   // jeda minimum antar kirim Telegram
 #define DS_CONVERSION_MS        800UL     // waktu konversi DS18B20
 
 #define STACK_KONTROL  8192
@@ -827,26 +828,31 @@ void taskKontrol(void *) {
     if (millis() - tSensor >= INTERVAL_SENSOR_READ) {
       tSensor = millis();
 
-      // DS18B20 asinkron: baca hasil konversi sebelumnya, lalu minta yang baru
-      float t = ds.getTempCByIndex(0);
-      if (t != DEVICE_DISCONNECTED_C && t > -100 && t < 150) {
-        xSemaphoreTake(dataMx, portMAX_DELAY);
-        snap.temp = t;
-        xSemaphoreGive(dataMx);
-      } else {
-        static bool dsWarned = false;
-        if (!dsWarned) {
-          dsWarned = true;
-          Serial.println("[DS] Pembacaan gagal (-127) — akan di-scan ulang tiap 5 dtk");
+      // DS18B20 asinkron: konversi butuh ~800 ms → baca/minta TIAP 1 dtk
+      // (bila dipaksa 500 ms konversi selalu terputus → suhu tak pernah segar)
+      static uint32_t tDs = 0;
+      if (millis() - tDs >= INTERVAL_DS_READ) {
+        tDs = millis();
+        float t = ds.getTempCByIndex(0);
+        if (t != DEVICE_DISCONNECTED_C && t > -100 && t < 150) {
+          xSemaphoreTake(dataMx, portMAX_DELAY);
+          snap.temp = t;
+          xSemaphoreGive(dataMx);
+        } else {
+          static bool dsWarned = false;
+          if (!dsWarned) {
+            dsWarned = true;
+            Serial.println("[DS] Pembacaan gagal (-127) — akan di-scan ulang tiap 5 dtk");
+          }
+          // re-scan bus bila sensor tidak terbaca (mis. baru dicolok)
+          if (millis() - lastDsScan >= 5000) {
+            lastDsScan = millis();
+            ds.begin();
+            if (ds.getDeviceCount() > 0) Serial.printf("[DS] DS18B20 terdeteksi ulang (%d)\n", ds.getDeviceCount());
+          }
         }
-        // re-scan bus bila sensor tidak terbaca (mis. baru dicolok)
-        if (millis() - lastDsScan >= 5000) {
-          lastDsScan = millis();
-          ds.begin();
-          if (ds.getDeviceCount() > 0) Serial.printf("[DS] DS18B20 terdeteksi ulang (%d)\n", ds.getDeviceCount());
-        }
+        ds.requestTemperatures();     // mulai konversi berikutnya (hasil dibaca 1 dtk lagi)
       }
-      ds.requestTemperatures();       // mulai konversi berikutnya (hasil dibaca 1 dtk lagi)
 
       float smoke = readMQ(PIN_MQ2, MQ2_RL, mq2R0, MQ2_A, MQ2_B, MQ2_CLEAN_AIR_RATIO, MQ2_R0_FALLBACK, "MQ2");
       float gas   = readMQ(PIN_MQ6, MQ6_RL, mq6R0, MQ6_A, MQ6_B, MQ6_CLEAN_AIR_RATIO, MQ6_R0_FALLBACK, "MQ6");
@@ -934,10 +940,11 @@ void taskKontrol(void *) {
         relayWrite(pin, on);
       }
 
-      // kipas: api keras → BOOST LANGSUNG (tanpa fan_delay);
-      // kondisi fuzzy saja (asap/gas tinggi) tetap menghormati fan_delay.
+      // kipas: api keras ATAU gas tinggi → BOOST LANGSUNG (tanpa fan_delay);
+      // kondisi fuzzy saja (asap tinggi tanpa keduanya) tetap menghormati fan_delay.
       // fan_duration tetap berlaku: durasi BOOST setelah semua pemicu hilang.
-      if (fireAny) {
+      bool gasHard = (d.gas >= s.gas_threshold);
+      if (fireAny || gasHard) {
         boostActive = true;
         boostCondSince = 0;
         boostCondEnded = 0;
