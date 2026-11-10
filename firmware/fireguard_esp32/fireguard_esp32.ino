@@ -211,6 +211,23 @@ Recipient recipients[8];
 int    nRecip = 0;
 uint32_t lastTgSend = (uint32_t)-TG_COOLDOWN_MS;  // kirim pertama langsung boleh
 
+// =====================================================================
+//  LcdInfo — data tampilan OLED (dipakai taskLayar di bawah)
+//  Didefinisikan DI ATAS fungsi pertama: Arduino menyisipkan auto-
+//  prototype fungsi (drawSplashScreen(const LcdInfo&) dll.) tepat sebelum
+//  fungsi pertama file ini — bila struct di bawah, compile error
+//  "'LcdInfo' does not name a type".
+// =====================================================================
+struct LcdInfo {
+  bool   wifiOk;                         // WiFi tersambung
+  bool   everWifi;                       // pernah tersambung
+  String ip;                             // IP saat tersambung
+  String name;                           // "Rumah A/B" (meta RTDB) atau DEVICE_ID
+  int    level;                          // 0 = AMAN, 1 = WASPADA, 2 = BAHAYA
+  bool   fire[4];
+  String reasons;                        // alasan level dari taskKontrol
+};
+
 #define MAX_RECIPIENTS 8
 
 // =====================================================================
@@ -903,15 +920,6 @@ void taskKontrol(void *) {
 Adafruit_SSD1306 lcd(128, 64, &Wire1, -1);
 bool lcdOk = false;
 
-struct LcdInfo {
-  bool   wifiOk;
-  bool   everWifi;                       // pernah tersambung
-  String ip;
-  String name;                           // "Rumah A/B" (meta RTDB) atau DEVICE_ID
-  int    level;                          // 0/1/2
-  bool   fire[4];
-  String reasons;                        // alasan level dari taskKontrol
-};
 LcdInfo lcdInfo = { false, false, "", "", 0, { false, false, false, false }, "" };
 SemaphoreHandle_t lcdMx;
 
