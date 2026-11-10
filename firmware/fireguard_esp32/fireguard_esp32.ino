@@ -38,7 +38,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Fonts/FreeSansBold9pt7b.h>    // font sedang (nama & jenis bahaya)
-#include <Fonts/FreeSansBold18pt7b.h>   // font besar (status AMAN/BAHAYA)
+#include <Fonts/FreeSansBold12pt7b.h>   // font besar utk panel 32px (status)
+#include <Fonts/FreeSansBold18pt7b.h>   // font besar (utk panel 64px bila pakai)
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <time.h>
@@ -74,12 +75,12 @@
 #define PIN_RELAY_FAN  14    // relay IN5 → kipas (fan1)
 
 // =====================================================================
-//  2b. OLED SSD1306 128x64 — I2C KEDUA (Wire1, supaya tidak berebut
-//      bus dengan ADS1115 yang dibaca task lain)
+//  2b. OLED SSD1306 — DIPASANG DI BUS Wire YANG SAMA DENGAN ADS1115
+//      (GPIO 8/9, alamat 0x3C — ADS 0x48, alamat beda = aman berbagi).
+//      Akses bus diserialkan dengan mutex i2cMx (ADS dibaca taskKontrol,
+//      OLED ditulis taskLayar) supaya tidak tabrakan antar FreeRTOS.
 // =====================================================================
-#define PIN_OLED_SDA    6     // SDA OLED → GPIO 6
-#define PIN_OLED_SCL    7     // SCL OLED → GPIO 7
-#define OLED_ADDR       0x3C  // tak tampil? coba 0x3D (tahan pada resistor ADDR)
+#define OLED_ADDR       0x3C  // alamat panel (sudah terbukti)
 #define OLED_SPLASH_MS  3000UL // durasi layar nama web + IP setelah tersambung
 
 // prototype maju (implementasi di blok OLED tepat sebelum setup());
@@ -210,6 +211,8 @@ struct Recipient { String chatId; String label; };
 Recipient recipients[8];
 int    nRecip = 0;
 uint32_t lastTgSend = (uint32_t)-TG_COOLDOWN_MS;  // kirim pertama langsung boleh
+
+SemaphoreHandle_t i2cMx;         // serialisasi bus Wire (ADS1115 ↔ OLED)
 
 // =====================================================================
 //  LcdInfo — data tampilan OLED (dipakai taskLayar di bawah)
@@ -661,7 +664,10 @@ void relayWrite(int pin, bool on) {
 
 // Baca 1 channel ADS1115 (0..32767 @ ±4.096V)
 int16_t adsRead(int ch) {
-  return ads.readADC_SingleEnded(ch);
+  xSemaphoreTake(i2cMx, portMAX_DELAY);   // bus Wire dipakai bersama taskLayar (OLED)
+  int16_t v = ads.readADC_SingleEnded(ch);
+  xSemaphoreGive(i2cMx);
+  return v;
 }
 
 // Threshold per channel: auto-baseline (dari udara bersih saat boot) atau tetap
@@ -904,7 +910,7 @@ void taskKontrol(void *) {
 //  Setup
 // =====================================================================
 // =====================================================================
-//  OLED SSD1306 128x64 — task "Layar" (core 0, prio 1)
+//  OLED SSD1306 128x32 — task "Layar" (core 0, prio 1)
 // =====================================================================
 //  - Boot / WiFi putus → animasi koneksi WiFi (ikon busur naik + titik)
 //  - Baru tersambung   → 3 dtk: nama web + IP address
@@ -913,10 +919,11 @@ void taskKontrol(void *) {
 //      WASPADA : jenis bahaya singkat + "WASPADA" (berkedip lambat)
 //      BAHAYA  : jenis & letak ("API TITIK 2", "ASAP TINGGI", ...) + font
 //                besar "BAHAYA" + animasi api berkedip / asap naik
+//  Panel berbagi bus Wire dengan ADS1115 → transfer pakai mutex i2cMx.
 //  Data ditulis taskKontrol (level, api, alasan) & taskKomunikasi
 //  (WiFi/IP/nama) di balik mutex lcdMx — dibaca taskLayar tiap 50 ms.
 // =====================================================================
-Adafruit_SSD1306 lcd(128, 64, &Wire1, -1);
+Adafruit_SSD1306 lcd(128, 32, &Wire, -1);
 bool lcdOk = false;
 
 LcdInfo lcdInfo = { false, false, "", "", 0, { false, false, false, false }, "" };
@@ -980,9 +987,16 @@ void drawSmoke(int cx, int baseY, uint8_t frame) {
 
 // ---------- panel & helper teks ----------
 
-// Teks status besar di tengah (y = baseline)
+// Kirim frame ke panel — transfer I2C dijaga mutex bus (dipakai ADS juga)
+void lcdShow() {
+  xSemaphoreTake(i2cMx, portMAX_DELAY);
+  lcd.display();
+  xSemaphoreGive(i2cMx);
+}
+
+// Teks status besar di tengah (y = baseline) — 12pt agar muat layar 32px
 void drawBigStatus(const char *txt, int y) {
-  lcd.setFont(&FreeSansBold18pt7b);
+  lcd.setFont(&FreeSansBold12pt7b);
   int16_t x1, y1; uint16_t w, h;
   lcd.getTextBounds(txt, 0, 0, &x1, &y1, &w, &h);
   lcd.setCursor((128 - (int)w) / 2, y);
@@ -1020,27 +1034,27 @@ void drawConnectingScreen() {
   uint8_t dot = (millis() / 250) % 3;                // titik yang melompat
   lcd.clearDisplay();
   lcd.setTextColor(SSD1306_WHITE);
-  drawWifiArc(24, 24, arc, 2, 5);
+  drawWifiArc(20, 24, arc, 2, 4);                    // ikon WiFi (radius maks 14)
   lcd.setFont(&FreeSansBold9pt7b);
-  lcd.setCursor(48, 26); lcd.print(F("WIFI"));
+  lcd.setCursor(44, 16); lcd.print(F("WIFI"));
   lcd.setFont();
   lcd.setTextSize(1);
-  lcd.setCursor(48, 36); lcd.print(F("menghubungkan"));
+  lcd.setCursor(44, 20); lcd.print(F("menghubungkan.."));
   for (uint8_t i = 0; i < 3; i++)
-    lcd.fillCircle(56 + i * 10, 52, (i == dot) ? 3 : 2, SSD1306_WHITE);
-  lcd.display();
+    lcd.fillCircle(52 + i * 12, 28, (i == dot) ? 3 : 2, SSD1306_WHITE);
+  lcdShow();
 }
 
 void drawSplashScreen(const LcdInfo &inf) {
   lcd.clearDisplay();
   lcd.setTextColor(SSD1306_WHITE);
   lcd.setFont(&FreeSansBold9pt7b);
-  lcd.setCursor(6, 20);  lcd.print(F("Sistem Prototype"));
-  lcd.setCursor(6, 36);  lcd.print(F("Kebakaran Rumah"));
+  lcd.setCursor(2, 10);  lcd.print(F("Sistem Prototype"));
+  lcd.setCursor(2, 22);  lcd.print(F("Kebakaran Rumah"));
   lcd.setFont();
   lcd.setTextSize(1);
-  lcd.setCursor(24, 54); lcd.print("IP " + inf.ip);
-  lcd.display();
+  lcd.setCursor(20, 31); lcd.print("IP " + inf.ip);
+  lcdShow();
 }
 
 void drawMainScreen(const LcdInfo &inf) {
@@ -1049,30 +1063,30 @@ void drawMainScreen(const LcdInfo &inf) {
   lcd.setTextColor(SSD1306_WHITE);
 
   if (inf.level <= 0) {
-    // AMAN: nama rumah + ikon wifi kecil, lalu "AMAN" besar
+    // AMAN: nama rumah (9pt) + ikon wifi kecil, lalu "AMAN" besar
     lcd.setFont(&FreeSansBold9pt7b);
-    lcd.setCursor(2, 18); lcd.print(inf.name);
+    lcd.setCursor(2, 11); lcd.print(inf.name);
     lcd.setFont();
-    drawWifiArc(121, 20, 3, 2, 3);                   // sinyal kecil kanan-atas
-    drawBigStatus("AMAN", 54);
+    drawWifiArc(121, 10, 3, 2, 3);                   // sinyal kecil kanan-atas
+    drawBigStatus("AMAN", 30);
   } else {
     // jenis & letak — bergantian bila ada beberapa sebab (1.2 dtk / entri)
     String list[3]; uint8_t n;
     buildReasonList(inf, list, n);
     const String &r = list[(millis() / 1200) % max(n, (uint8_t)1)];
-    drawReasonLine(r, 20);
+    drawReasonLine(r, 11);
 
     bool hasFire = list[0].startsWith("API");
     if (inf.level >= 2) {
-      drawBigStatus("BAHAYA", 54);
-      if (hasFire) drawFlame(121, 24, frame);        // animasi api (kanan-atas)
-      else         drawSmoke(121, 24, frame);        // animasi asap naik
+      drawBigStatus("BAHAYA", 30);
+      if (hasFire) drawFlame(118, 31, frame);        // animasi api (kanan-bawah)
+      else         drawSmoke(118, 31, frame);        // animasi asap naik
     } else {
-      if ((millis() / 600) & 1) drawBigStatus("WASPADA", 54);  // berkedip lambat
-      drawSmoke(121, 24, frame);
+      if ((millis() / 600) & 1) drawBigStatus("WASPADA", 30);  // berkedip lambat
+      drawSmoke(118, 31, frame);
     }
   }
-  lcd.display();
+  lcdShow();
 }
 
 void taskLayar(void *) {
@@ -1133,40 +1147,21 @@ void setup() {
     Serial.println("[ADS] ADS1115 siap (0x48)");
   }
 
-  // ---- OLED SSD1306 (bus I2C kedua, terpisah dari ADS1115) ----
-  // 1) scan seluruh bus: cari perangkat di 1..0x7E (baik untuk diagnosa
-  //    wiring lepas / alamat salah), 2) coba init di alamat ketemu,
-  //    3) bila gagal di 400 kHz coba ulang di 100 kHz (modul murah).
-  Wire1.begin(PIN_OLED_SDA, PIN_OLED_SCL);
-  uint8_t addrFound = 0;
-  for (uint8_t a = 1; a < 0x7E; a++) {
-    Wire1.beginTransmission(a);
-    if (Wire1.endTransmission() == 0) {
-      Serial.printf("[LCD] I2C scan: perangkat di 0x%02X\n", a);
-      if (a == OLED_ADDR || a == 0x3D) addrFound = a;
-    }
+  // ---- OLED SSD1306 di bus Wire yang sama dengan ADS1115 (addr 0x3C,
+  //      berbeda dari ADS 0x48 → aman berbagi). Akses antar-task diserialkan
+  //      lewat mutex i2cMx (dibuat di blok RTOS; task belum jalan di sini).
+  if (lcd.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    lcdOk = true;
+    lcd.clearDisplay();
+    lcd.setTextColor(SSD1306_WHITE);
+    lcd.display();                  // aman: task Layar belum berjalan
+    lcdInfo.name = DEVICE_ID;       // default s/d meta/name dari RTDB masuk
+    Serial.printf("[LCD] SSD1306 siap (0x%02X, bus Wire SDA=%d SCL=%d, digabung ADS)\n",
+                  OLED_ADDR, I2C_SDA, I2C_SCL);
+  } else {
+    Serial.println("[LCD] SSD1306 TIDAK TERDETEKSI di 0x3C — layar dipaksa mati, "
+                   "sistem tetap jalan. Kabel OLED tetap di SDA=8/SCL=9.");
   }
-  if (addrFound == 0)
-    Serial.println("[LCD] I2C scan: TIDAK ADA perangkat di bus (cek SDA=6, SCL=7, VCC, GND)");
-  const uint32_t lcdClocks[2] = { 400000UL, 100000UL };
-  for (uint8_t c = 0; c < 2 && !lcdOk; c++) {
-    Wire1.setClock(lcdClocks[c]);
-    if (lcd.begin(SSD1306_SWITCHCAPVCC, addrFound ? addrFound : OLED_ADDR)) {
-      lcdOk = true;
-      lcd.clearDisplay();
-      lcd.setTextColor(SSD1306_WHITE);
-      lcd.display();
-      lcdInfo.name = DEVICE_ID;     // default s/d meta/name dari RTDB masuk.
-                                    // (tanpa mutex: task lain belum berjalan;
-                                    //  lcdMx dibuat di blok RTOS di bawah)
-      Serial.printf("[LCD] SSD1306 siap (0x%02X, SDA=%d SCL=%d, %lu Hz)\n",
-                    addrFound ? addrFound : OLED_ADDR, PIN_OLED_SDA, PIN_OLED_SCL,
-                    (unsigned long)lcdClocks[c]);
-    }
-  }
-  if (!lcdOk)
-    Serial.println("[LCD] SSD1306 GAGAL init — layar dipaksa mati, sistem tetap jalan. "
-                   "Cek hasil [LCD] I2C scan di atas.");
   ds.begin();
   ds.setWaitForConversion(false);   // asinkron: request → tunggu → baca (tidak blocking)
   if (ds.getDeviceCount() > 0) {
@@ -1214,6 +1209,7 @@ void setup() {
   // RTOS objects — HARUS sebelum pollSettings (dipakai di dalamnya)
   dataMx = xSemaphoreCreateMutex();
   lcdMx  = xSemaphoreCreateMutex();   // data tampilan OLED (LcdInfo)
+  i2cMx  = xSemaphoreCreateMutex();   // serialisasi bus Wire (ADS ↔ OLED)
   outQueue = xQueueCreate(QUEUE_LEN, sizeof(OutMsg));
 
   // Ambil pengaturan awal + nama perangkat
