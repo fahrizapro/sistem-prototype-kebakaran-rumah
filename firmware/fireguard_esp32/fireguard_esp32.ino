@@ -1045,16 +1045,31 @@ void drawConnectingScreen() {
   lcdShow();
 }
 
-void drawSplashScreen(const LcdInfo &inf) {
+void drawSplashScreen(const LcdInfo &inf, uint32_t since) {
   lcd.clearDisplay();
   lcd.setTextColor(SSD1306_WHITE);
+  // baseline 9pt = 12px dari atas glyph — kurang dari itu → tulisan kepotong
   lcd.setFont(&FreeSansBold9pt7b);
-  lcd.setCursor(2, 10);  lcd.print(F("Sistem Prototype"));
-  lcd.setCursor(2, 22);  lcd.print(F("Kebakaran Rumah"));
+  lcd.setCursor(2, 12);  lcd.print(F("Sistem Prototype"));
+  lcd.setCursor(2, 24);  lcd.print(F("Kebakaran Rumah"));
+  // alamat web berjalan (marquee) + IP di jalur paling bawah
+  drawMarquee(String("monitoringkebakaranrumah.web.app | IP ") + inf.ip, 31, since);
+  lcdShow();
+}
+
+// Teks berjalan dari kanan ke kiri tanpa terputus (duituhkan satu set font
+// default; y = TOP koordinat teks size 1). since = t0 animasi.
+void drawMarquee(const String &txt, int y, uint32_t since) {
   lcd.setFont();
   lcd.setTextSize(1);
-  lcd.setCursor(20, 31); lcd.print("IP " + inf.ip);
-  lcdShow();
+  int16_t x1, y1; uint16_t w, h;
+  lcd.getTextBounds(txt.c_str(), 0, 0, &x1, &y1, &w, &h);
+  int gap = 12;                          // jarak antar pengulangan
+  int period = (int)w + gap;
+  int firstX = 128 - (int)((millis() - since) % (uint32_t)period);
+  lcd.setCursor(firstX, y);       lcd.print(txt);
+  lcd.setCursor(firstX + period, y); lcd.print(txt);  // salinan utk loop mulus
+  lcd.setFont();
 }
 
 void drawMainScreen(const LcdInfo &inf) {
@@ -1065,24 +1080,24 @@ void drawMainScreen(const LcdInfo &inf) {
   if (inf.level <= 0) {
     // AMAN: nama rumah (9pt) + ikon wifi kecil, lalu "AMAN" besar
     lcd.setFont(&FreeSansBold9pt7b);
-    lcd.setCursor(2, 11); lcd.print(inf.name);
+    lcd.setCursor(2, 12); lcd.print(inf.name);
     lcd.setFont();
-    drawWifiArc(121, 10, 3, 2, 3);                   // sinyal kecil kanan-atas
-    drawBigStatus("AMAN", 30);
+    drawWifiArc(121, 12, 3, 2, 3);                   // sinyal kecil kanan-atas
+    drawBigStatus("AMAN", 31);
   } else {
     // jenis & letak — bergantian bila ada beberapa sebab (1.2 dtk / entri)
     String list[3]; uint8_t n;
     buildReasonList(inf, list, n);
     const String &r = list[(millis() / 1200) % max(n, (uint8_t)1)];
-    drawReasonLine(r, 11);
+    drawReasonLine(r, 12);
 
     bool hasFire = list[0].startsWith("API");
     if (inf.level >= 2) {
-      drawBigStatus("BAHAYA", 30);
+      drawBigStatus("BAHAYA", 31);
       if (hasFire) drawFlame(118, 31, frame);        // animasi api (kanan-bawah)
       else         drawSmoke(118, 31, frame);        // animasi asap naik
     } else {
-      if ((millis() / 600) & 1) drawBigStatus("WASPADA", 30);  // berkedip lambat
+      if ((millis() / 600) & 1) drawBigStatus("WASPADA", 31);  // berkedip lambat
       drawSmoke(118, 31, frame);
     }
   }
@@ -1111,7 +1126,7 @@ void taskLayar(void *) {
       st = ST_SPLASH; splashAt = millis(); lastWifi = true;
     }
     if (st == ST_SPLASH) {
-      drawSplashScreen(inf);
+      drawSplashScreen(inf, splashAt);
       if (millis() - splashAt >= OLED_SPLASH_MS) st = ST_MAIN;
       continue;
     }
@@ -1179,13 +1194,16 @@ void setup() {
   }
   ds.requestTemperatures();         // mulai konversi pertama
 
+  uint32_t lcdAnimT = 0;                       // acuan fps animasi koneksi di setup
   WiFi.mode(WIFI_STA);
   WiFi.hostname(DEVICE_ID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("[WiFi] Menghubungkan ke %s", WIFI_SSID);
   uint32_t t0 = millis();
+  if (lcdOk) drawConnectingScreen();          // startup: animasi koneksi di OLED
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) {
     delay(300); Serial.print('.');
+    if (lcdOk && millis() - lcdAnimT >= 120) { lcdAnimT = millis(); drawConnectingScreen(); }
   }
   Serial.println(WiFi.status() == WL_CONNECTED
       ? "\n[WiFi] Terhubung, IP: " + WiFi.localIP().toString()

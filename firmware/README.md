@@ -73,7 +73,7 @@ Mesin status di task `Layar` (core 0, prioritas 1, siklus 50 ms):
 | Kondisi | Tampilan |
 |---|---|
 | Boot / WiFi putus | Animasi koneksi: ikon WiFi busur naik 0→3 + titik melompat ("WIFI menghubungkan..") |
-| Baru tersambung | **3 detik** (`OLED_SPLASH_MS`): "Sistem Prototype / Kebakaran Rumah" + `IP x.x.x.x` |
+| Baru tersambung | **3 detik** (`OLED_SPLASH_MS`): "Sistem Prototype / Kebakaran Rumah" + **alamat web berjalan (marquee)** + `IP x.x.x.x` |
 | Layar utama — AMAN | Baris 1: nama rumah (meta `name` di RTDB; default DEVICE_ID); baris 2: **AMAN** (FreeSansBold 12pt) |
 | Layar utama — WASPADA | Jenis bahaya singkat + **WASPADA** berkedip lambat + animasi asap |
 | Layar utama — BAHAYA | Jenis & letak ("API TITIK 2", "SUHU/ASAP/GAS TINGGI" — bergantian tiap 1,2 dtk bila lebih dari satu) + **BAHAYA** besar + animasi api berkedip (saat api) / asap naik |
