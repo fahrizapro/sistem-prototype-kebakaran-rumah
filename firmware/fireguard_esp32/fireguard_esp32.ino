@@ -215,6 +215,7 @@ int    nRecip = 0;
 uint32_t lastTgSend = (uint32_t)-TG_COOLDOWN_MS;  // kirim pertama langsung boleh
 
 SemaphoreHandle_t i2cMx;         // serialisasi bus Wire (ADS1115 ↔ OLED)
+SemaphoreHandle_t lcdMx;         // melindungi struct LcdInfo (data layar OLED)
 
 // =====================================================================
 //  LcdInfo — data tampilan OLED (dipakai taskLayar di bawah)
@@ -1015,7 +1016,6 @@ Adafruit_SSD1306 lcd(128, 32, &Wire, -1);
 bool lcdOk = false;
 
 LcdInfo lcdInfo;                                    // static → POD member zero-init
-SemaphoreHandle_t lcdMx;
 
 void publishLcdWifi(bool ok) {
   if (!lcdOk) return;
