@@ -722,7 +722,6 @@ void taskKontrol(void *) {
   bool boostActive = false;
   uint32_t boostCondSince = 0, boostCondEnded = 0;
   uint32_t fzSprSince = 0;         // jeda jalur fuzzy untuk sprinkler
-  uint32_t boostCondSince = 0, boostCondEnded = 0;
 
   for (;;) {
     // ---------- 1. Baca sensor ----------
