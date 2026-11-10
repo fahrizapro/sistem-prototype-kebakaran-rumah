@@ -1139,6 +1139,14 @@ void setup() {
   analogSetPinAttenuation(PIN_MQ6, ADC_11db);
 
   Wire.begin(I2C_SDA, I2C_SCL);
+
+  // RTOS objects — HARUS paling awal: i2cMx dipakai adsRead() saat baseline
+  // diambil di setup, dataMx dipakai pollSettings/pollMeta. (Sebelumnya
+  // dibuat di bawah → assert failed xQueueSemaphoreTake (pxQueue NULL).)
+  dataMx = xSemaphoreCreateMutex();
+  lcdMx  = xSemaphoreCreateMutex();   // data tampilan OLED (LcdInfo)
+  i2cMx  = xSemaphoreCreateMutex();   // serialisasi bus Wire (ADS ↔ OLED)
+  outQueue = xQueueCreate(QUEUE_LEN, sizeof(OutMsg));
   if (!ads.begin(ADS_ADDR)) {
     Serial.println("[ADS] ADS1115 TIDAK TERDETEKSI! Cek wiring I2C/alamat 0x48.");
   } else {
@@ -1205,12 +1213,6 @@ void setup() {
                 fireBase[0], fireBase[1], fireBase[2], fireBase[3],
                 FIRE_ACTIVE_ABOVE ? "+" : "-", FIRE_MARGIN);
 #endif
-
-  // RTOS objects — HARUS sebelum pollSettings (dipakai di dalamnya)
-  dataMx = xSemaphoreCreateMutex();
-  lcdMx  = xSemaphoreCreateMutex();   // data tampilan OLED (LcdInfo)
-  i2cMx  = xSemaphoreCreateMutex();   // serialisasi bus Wire (ADS ↔ OLED)
-  outQueue = xQueueCreate(QUEUE_LEN, sizeof(OutMsg));
 
   // Ambil pengaturan awal + nama perangkat
   pollSettings();
