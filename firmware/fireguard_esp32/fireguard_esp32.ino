@@ -24,6 +24,7 @@
  *    - OneWire                (Paul Stoffregen)
  *    - DallasTemperature      (Miles Burton)
  *    - Adafruit ADS1X15       (+ Adafruit BusIO)
+ *    - Adafruit SSD1306       (+ Adafruit GFX)  ← OLED 128x64 I2C kedua
  *  Tidak perlu library Firebase — komunikasi via REST HTTPS.
  * =====================================================================
  */
@@ -34,6 +35,10 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_ADS1X15.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Fonts/FreeSansBold9pt7b.h>    // font sedang (nama & jenis bahaya)
+#include <Fonts/FreeSansBold18pt7b.h>   // font besar (status AMAN/BAHAYA)
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <time.h>
@@ -67,6 +72,21 @@
 #define PIN_RELAY_SPR3 12    // relay IN3 → sprinkler 3
 #define PIN_RELAY_SPR4 13    // relay IN4 → sprinkler 4
 #define PIN_RELAY_FAN  14    // relay IN5 → kipas (fan1)
+
+// =====================================================================
+//  2b. OLED SSD1306 128x64 — I2C KEDUA (Wire1, supaya tidak berebut
+//      bus dengan ADS1115 yang dibaca task lain)
+// =====================================================================
+#define PIN_OLED_SDA    6     // SDA OLED → GPIO 6
+#define PIN_OLED_SCL    7     // SCL OLED → GPIO 7
+#define OLED_ADDR       0x3C  // tak tampil? coba 0x3D (tahan pada resistor ADDR)
+#define OLED_SPLASH_MS  3000UL // durasi layar nama web + IP setelah tersambung
+
+// prototype maju (implementasi di blok OLED tepat sebelum setup());
+// dipanggil dari pollMeta/taskKontrol/taskKomunikasi di atas
+void publishLcdName(const String &n);
+void publishLcdData(int level, const bool *fire, const String &reasons);
+void publishLcdWifi(bool ok);
 
 #define RELAY_ACTIVE_LOW   1 // modul relay umumnya aktif-LOW: IN = LOW → relay ON
 #define BUZZER_ACTIVE_HIGH 1 // driver BC548 NPN: GPIO HIGH → transistor ON → buzzer bunyi
@@ -471,6 +491,7 @@ void pollMeta() {
   String n = String(doc.as<const char *>());
   if (n.length() && n != deviceName) {
     deviceName = n;
+    publishLcdName(deviceName);       // OLED: nama rumah ikut meta RTDB
     Serial.printf("[KOM] Nama perangkat: %s\n", deviceName.c_str());
   }
 }
@@ -562,10 +583,13 @@ void taskKomunikasi(void *) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+      publishLcdWifi(true);           // OLED: status sambung + IP
       if (millis() - tStatus >= INTERVAL_STATUS_PUSH)   { tStatus = millis(); pushStatus(); }
       if (millis() - tAct   >= INTERVAL_ACTUATOR_POLL)  { tAct = millis();    pollActuators(); }
       if (millis() - tSet   >= INTERVAL_SETTINGS_POLL)  { tSet = millis();    pollSettings(); }
       if (millis() - tMeta  >= INTERVAL_META_POLL)      { tMeta = millis();   pollMeta(); }
+    } else {
+      publishLcdWifi(false);          // OLED: kembali ke animasi koneksi
     }
 
     // ---- antrean keluar: event + Telegram ----
@@ -769,6 +793,7 @@ void taskKontrol(void *) {
     snap.level = level;
     snap.stamp = millis();
     xSemaphoreGive(dataMx);
+    publishLcdData(level, d.fire, reasons);   // OLED: level + api + alasan
 
     // ---------- 4. Aktuator ----------
     if (millis() - tApply >= 100) {
@@ -862,6 +887,217 @@ void taskKontrol(void *) {
 // =====================================================================
 //  Setup
 // =====================================================================
+// =====================================================================
+//  OLED SSD1306 128x64 — task "Layar" (core 0, prio 1)
+// =====================================================================
+//  - Boot / WiFi putus → animasi koneksi WiFi (ikon busur naik + titik)
+//  - Baru tersambung   → 3 dtk: nama web + IP address
+//  - Layar utama       → maks 2 baris:
+//      AMAN    : nama rumah + "AMAN" (font besar)
+//      WASPADA : jenis bahaya singkat + "WASPADA" (berkedip lambat)
+//      BAHAYA  : jenis & letak ("API TITIK 2", "ASAP TINGGI", ...) + font
+//                besar "BAHAYA" + animasi api berkedip / asap naik
+//  Data ditulis taskKontrol (level, api, alasan) & taskKomunikasi
+//  (WiFi/IP/nama) di balik mutex lcdMx — dibaca taskLayar tiap 50 ms.
+// =====================================================================
+Adafruit_SSD1306 lcd(128, 64, &Wire1, -1);
+bool lcdOk = false;
+
+struct LcdInfo {
+  bool   wifiOk;
+  bool   everWifi;                       // pernah tersambung
+  String ip;
+  String name;                           // "Rumah A/B" (meta RTDB) atau DEVICE_ID
+  int    level;                          // 0/1/2
+  bool   fire[4];
+  String reasons;                        // alasan level dari taskKontrol
+};
+LcdInfo lcdInfo = { false, false, "", "", 0, { false, false, false, false }, "" };
+SemaphoreHandle_t lcdMx;
+
+void publishLcdWifi(bool ok) {
+  if (!lcdOk) return;
+  String ip = (ok ? WiFi.localIP().toString() : "");
+  xSemaphoreTake(lcdMx, portMAX_DELAY);
+  if (lcdInfo.wifiOk != ok) lcdInfo.wifiOk = ok;
+  if (ok && lcdInfo.ip != ip) lcdInfo.ip = ip;
+  xSemaphoreGive(lcdMx);
+}
+
+void publishLcdName(const String &n) {
+  if (!lcdOk) return;
+  xSemaphoreTake(lcdMx, portMAX_DELAY);
+  lcdInfo.name = n;
+  xSemaphoreGive(lcdMx);
+}
+
+void publishLcdData(int level, const bool *fire, const String &reasons) {
+  if (!lcdOk) return;
+  xSemaphoreTake(lcdMx, portMAX_DELAY);
+  lcdInfo.level = level;
+  for (int i = 0; i < 4; i++) lcdInfo.fire[i] = fire[i];
+  lcdInfo.reasons = reasons;
+  xSemaphoreGive(lcdMx);
+}
+
+// ---------- ikon & animasi ----------
+
+// Ikon WiFi: titik + busur sinyal (level 0..3), baseD = radius titik,
+// stepD = jarak antar busur (besar utk animasi koneksi, kecil utk sudut layar)
+void drawWifiArc(int cx, int cy, uint8_t level, int baseD, int stepD) {
+  lcd.fillCircle(cx, cy, baseD, SSD1306_WHITE);
+  for (uint8_t i = 1; i <= level; i++) {
+    int r = baseD + i * stepD;                       // 0x1|0x2 = setengah lingkaran atas
+    lcd.drawCircleHelper(cx, cy, r,     0x1 | 0x2, SSD1306_WHITE);
+    lcd.drawCircleHelper(cx, cy, r + 1, 0x1 | 0x2, SSD1306_WHITE);
+  }
+}
+
+// Api berkedip (frame 0..3 — tinggi/lebar lidah berganti)
+void drawFlame(int cx, int baseY, uint8_t frame) {
+  int h = 9 + (frame & 1) * 3;
+  int w = 5 + ((frame >> 1) & 1) * 2;
+  lcd.fillTriangle(cx - w, baseY, cx + w, baseY, cx, baseY - h, SSD1306_WHITE);
+  lcd.fillCircle(cx, baseY - 3, 4, SSD1306_WHITE);
+  lcd.fillCircle(cx, baseY - 2, 2, SSD1306_BLACK);   // inti gelap
+}
+
+// Asap naik (bola-bola berganti posisi)
+void drawSmoke(int cx, int baseY, uint8_t frame) {
+  for (uint8_t i = 0; i < 3; i++) {
+    int dy = (frame * 2 + i * 7) % 16;
+    int side = ((i + frame) & 1) ? 3 : -3;
+    lcd.drawCircle(cx + side, baseY - dy, 3, SSD1306_WHITE);
+  }
+}
+
+// ---------- panel & helper teks ----------
+
+// Teks status besar di tengah (y = baseline)
+void drawBigStatus(const char *txt, int y) {
+  lcd.setFont(&FreeSansBold18pt7b);
+  int16_t x1, y1; uint16_t w, h;
+  lcd.getTextBounds(txt, 0, 0, &x1, &y1, &w, &h);
+  lcd.setCursor((128 - (int)w) / 2, y);
+  lcd.print(txt);
+  lcd.setFont();
+}
+
+// Teks jenis bahaya besarmenengah (9pt)
+void drawReasonLine(const String &s, int y) {
+  lcd.setFont(&FreeSansBold9pt7b);
+  int16_t x1, y1; uint16_t w, h;
+  lcd.getTextBounds(s.c_str(), 0, 0, &x1, &y1, &w, &h);
+  int x = (128 - (int)w) / 2; if (x < 0) x = 0;
+  lcd.setCursor(x, y);
+  lcd.print(s);
+  lcd.setFont();
+}
+
+// Susun daftar singkat jenis-letak bahaya (maks 3 entri, urut prioritas)
+void buildReasonList(const LcdInfo &inf, String out[3], uint8_t &n) {
+  n = 0;
+  String f;                                          // api → letak (titik)
+  for (int i = 0; i < 4; i++)
+    if (inf.fire[i]) f += String(f.length() ? ", " : "") + String(i + 1);
+  if (f.length()) out[n++] = "API TITIK " + f;
+  if (inf.reasons.indexOf("Suhu") >= 0)  out[n++] = "SUHU TINGGI";
+  if (inf.reasons.indexOf("Asap") >= 0)  out[n++] = "ASAP TINGGI";
+  if (inf.reasons.indexOf("Gas")  >= 0)  out[n++] = "GAS TINGGI";
+}
+
+// ---------- layar-layar ----------
+
+void drawConnectingScreen() {
+  uint8_t arc = (millis() / 350) % 4;                // busur naik 0→3 lalu ulang
+  uint8_t dot = (millis() / 250) % 3;                // titik yang melompat
+  lcd.clearDisplay();
+  lcd.setTextColor(SSD1306_WHITE);
+  drawWifiArc(24, 24, arc, 2, 5);
+  lcd.setFont(&FreeSansBold9pt7b);
+  lcd.setCursor(48, 26); lcd.print(F("WIFI"));
+  lcd.setFont();
+  lcd.setTextSize(1);
+  lcd.setCursor(48, 36); lcd.print(F("menghubungkan"));
+  for (uint8_t i = 0; i < 3; i++)
+    lcd.fillCircle(56 + i * 10, 52, (i == dot) ? 3 : 2, SSD1306_WHITE);
+  lcd.display();
+}
+
+void drawSplashScreen(const LcdInfo &inf) {
+  lcd.clearDisplay();
+  lcd.setTextColor(SSD1306_WHITE);
+  lcd.setFont(&FreeSansBold9pt7b);
+  lcd.setCursor(6, 20);  lcd.print(F("Sistem Prototype"));
+  lcd.setCursor(6, 36);  lcd.print(F("Kebakaran Rumah"));
+  lcd.setFont();
+  lcd.setTextSize(1);
+  lcd.setCursor(24, 54); lcd.print("IP " + inf.ip);
+  lcd.display();
+}
+
+void drawMainScreen(const LcdInfo &inf) {
+  uint8_t frame = (millis() / 280) & 0x03;           // 4 frame @ ~3.6 fps
+  lcd.clearDisplay();
+  lcd.setTextColor(SSD1306_WHITE);
+
+  if (inf.level <= 0) {
+    // AMAN: nama rumah + ikon wifi kecil, lalu "AMAN" besar
+    lcd.setFont(&FreeSansBold9pt7b);
+    lcd.setCursor(2, 18); lcd.print(inf.name);
+    lcd.setFont();
+    drawWifiArc(121, 20, 3, 2, 3);                   // sinyal kecil kanan-atas
+    drawBigStatus("AMAN", 54);
+  } else {
+    // jenis & letak — bergantian bila ada beberapa sebab (1.2 dtk / entri)
+    String list[3]; uint8_t n;
+    buildReasonList(inf, list, n);
+    const String &r = list[(millis() / 1200) % max(n, (uint8_t)1)];
+    drawReasonLine(r, 20);
+
+    bool hasFire = list[0].startsWith("API");
+    if (inf.level >= 2) {
+      drawBigStatus("BAHAYA", 54);
+      if (hasFire) drawFlame(121, 24, frame);        // animasi api (kanan-atas)
+      else         drawSmoke(121, 24, frame);        // animasi asap naik
+    } else {
+      if ((millis() / 600) & 1) drawBigStatus("WASPADA", 54);  // berkedip lambat
+      drawSmoke(121, 24, frame);
+    }
+  }
+  lcd.display();
+}
+
+void taskLayar(void *) {
+  enum { ST_CONNECT, ST_SPLASH, ST_MAIN } st = ST_CONNECT;
+  bool lastWifi = false;
+  uint32_t splashAt = 0;
+
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    LcdInfo inf;
+    xSemaphoreTake(lcdMx, portMAX_DELAY);
+    inf = lcdInfo;
+    xSemaphoreGive(lcdMx);
+
+    if (!inf.wifiOk) {                               // WiFi belum/putus
+      st = ST_CONNECT; lastWifi = false;
+      drawConnectingScreen();
+      continue;
+    }
+    if (!lastWifi) {                                 // baru tersambung → splash
+      st = ST_SPLASH; splashAt = millis(); lastWifi = true;
+    }
+    if (st == ST_SPLASH) {
+      drawSplashScreen(inf);
+      if (millis() - splashAt >= OLED_SPLASH_MS) st = ST_MAIN;
+      continue;
+    }
+    drawMainScreen(inf);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   bootMs = millis();
@@ -888,6 +1124,24 @@ void setup() {
     ads.setGain(GAIN_ONE);          // ±4.096V — rentang 0..32767
     ads.setDataRate(RATE_ADS1115_250SPS);  // 4 ms/baca (default 128 SPS = 8 ms)
     Serial.println("[ADS] ADS1115 siap (0x48)");
+  }
+
+  // ---- OLED SSD1306 (bus I2C kedua, terpisah dari ADS1115) ----
+  Wire1.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  Wire1.setClock(400000UL);
+  if (lcd.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    lcdOk = true;
+    lcd.clearDisplay();
+    lcd.setTextColor(SSD1306_WHITE);
+    lcd.display();
+    lcdInfo.name = DEVICE_ID;       // default s/d meta/name dari RTDB masuk.
+                                    // (tanpa mutex: task lain belum berjalan;
+                                    //  lcdMx dibuat di blok RTOS di bawah)
+    Serial.printf("[LCD] SSD1306 siap (0x%02X, SDA=%d SCL=%d)\n",
+                  OLED_ADDR, PIN_OLED_SDA, PIN_OLED_SCL);
+  } else {
+    Serial.printf("[LCD] SSD1306 TIDAK TERDETEKSI di 0x%02X — layar dipaksa mati, "
+                  "sistem tetap jalan. Coba alamat 0x3D.\n", OLED_ADDR);
   }
   ds.begin();
   ds.setWaitForConversion(false);   // asinkron: request → tunggu → baca (tidak blocking)
@@ -935,6 +1189,7 @@ void setup() {
 
   // RTOS objects — HARUS sebelum pollSettings (dipakai di dalamnya)
   dataMx = xSemaphoreCreateMutex();
+  lcdMx  = xSemaphoreCreateMutex();   // data tampilan OLED (LcdInfo)
   outQueue = xQueueCreate(QUEUE_LEN, sizeof(OutMsg));
 
   // Ambil pengaturan awal + nama perangkat
@@ -959,6 +1214,10 @@ void setup() {
   // ---- Buat task dual-core ----
   xTaskCreatePinnedToCore(taskKontrol,   "Kontrol",   STACK_KONTROL, NULL, PRIO_KONTROL, NULL, CORE_KONTROL);
   xTaskCreatePinnedToCore(taskKomunikasi, "Komunikasi", STACK_KOM,     NULL, PRIO_KOM,     NULL, CORE_KOM);
+  if (lcdOk) {                        // task Layar hanya bila OLED terdeteksi
+    xTaskCreatePinnedToCore(taskLayar, "Layar", 8192, NULL, 1, NULL, 0);
+    Serial.println("[RTOS] Task Layar (core 0) berjalan");
+  }
   Serial.println("[RTOS] Task Kontrol (core 1) & Komunikasi (core 0) berjalan");
 }
 

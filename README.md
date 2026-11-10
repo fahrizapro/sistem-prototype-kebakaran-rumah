@@ -66,7 +66,7 @@ dengan Deteksi Api 4 Titik, Fuzzy Mamdani, dan Notifikasi Telegram Berbasis IoT
 
 | # | Fitur | Detail |
 |---|-------|--------|
-| 1 | 🧵 **2 Task FreeRTOS** | `taskKontrol` (core 1/APP — sensor + fuzzy + aktuator), `taskKomunikasi` (core 0/PRO — WiFi + RTDB + Telegram), sinkronisasi via mutex + antrean |
+| 1 | 🧵 **3 Task FreeRTOS** | `taskKontrol` (core 1/APP — sensor + fuzzy + aktuator), `taskKomunikasi` (core 0/PRO — WiFi + RTDB + Telegram), `taskLayar` (core 0, prioritas 1 — OLED SSD1306), sinkronisasi via mutex + antrean |
 | 2 | 🔥 **Deteksi Api 4 Titik** | Sensor api analog via **ADS1115** 16-bit (±4.096V, 250 SPS) — channel 0–3 |
 | 3 | 🧮 **Fuzzy Mamdani** | 3 input × 3 himpunan × 27 rule, MIN–MAX, defuzzifikasi diskrit → kipas FLOW/BOOST — **identik dengan `evalFuzzy()` web** |
 | 4 | ⏱️ **Trigger Keras Api** | Api di titik i → sprinkler i & kipas BOOST **langsung aktif** (sama cepat dengan buzzer, tanpa delay); bertahan `fan_duration` setelah pemicu hilang |
@@ -76,6 +76,7 @@ dengan Deteksi Api 4 Titik, Fuzzy Mamdani, dan Notifikasi Telegram Berbasis IoT
 | 8 | ✉️ **Telegram** | Alert perubahan level ke semua penerima (HTML), kirim pertama tanpa cooldown, cooldown 10 dtk |
 | 9 | 🛡️ **Safety Auto-Switch** | Saat **BAHAYA**, semua aktuator mode manual dipaksa kembali ke **AUTO** (PATCH RTDB + reset perintah lokal) — manual tidak boleh memblokir pemadam |
 | 10 | 💓 **Heartbeat 1 Detik** | Status dikirim tiap 1 dtk → web menandai device Online/Offline |
+| 11 | 📺 **Layar OLED SSD1306 128x64** | Animasi koneksi WiFi → splash "Sistem Prototype Kebakaran Rumah" + IP (3 dtk) → layar utama 2 baris: **"Rumah A Aman"** / **BAHAYA** + jenis & letak ("API TITIK 2") dengan animasi api berkedip / asap naik; nama ikut meta RTDB; bus I2C kedua (SDA 6, SCL 7) |
 
 ---
 
@@ -96,8 +97,10 @@ graph TB
     subgraph "⚡ ESP32-S3 (FreeRTOS Dual-Core)"
         TK["🧠 taskKontrol<br><i>Core 1 · Prio 3 · 8KB</i><br>Sensor → Fuzzy → Aktuator"]
         TC["🌐 taskKomunikasi<br><i>Core 0 · Prio 2 · 16KB</i><br>WiFi + RTDB + Telegram"]
+        TL["📺 taskLayar<br><i>Core 0 · Prio 1 · 8KB</i><br>OLED SSD1306 128x64"]
         Q["📬 outQueue<br><i>event → log/Telegram</i>"]
         MX["🔒 dataMx mutex<br><i>S · cmd · snap bersama</i>"]
+        LMX["🔒 lcdMx mutex<br><i>info tampilan OLED</i>"]
     end
 
     subgraph "☁️ Firebase (Asia-Southeast1)"
@@ -180,6 +183,8 @@ graph TB
 | 💧 Relay Sprinkler 3 | **GPIO 12** | Digital Output | relay IN3 |
 | 💧 Relay Sprinkler 4 | **GPIO 13** | Digital Output | relay IN4 |
 | 🌀 Relay Kipas (fan1) | **GPIO 14** | Digital Output | relay IN5 |
+| 📺 OLED SDA (SSD1306 128x64) | **GPIO 6** | I2C Data (Wire1) | bus I2C kedua, terpisah dari ADS1115 |
+| 📺 OLED SCL (SSD1306 128x64) | **GPIO 7** | I2C Clock (Wire1) | addr 0x3C (coba 0x3D bila blank), VCC 3.3V |
 
 ### ⚡ Logika Output
 
