@@ -55,21 +55,26 @@ menunda reaksi aktuator.
 | MQ6 AO | ADC1_CH1 | GPIO 2 | idem divider 10k/10k |
 | Relay IN1–IN4 | Digital out | GPIO 10, 11, 12, 13 | sprinkler 1–4 |
 | Relay IN5 | Digital out | GPIO 14 | kipas (fan1) |
-| OLED SSD1306 128x64 | I2C 0x3C (coba 0x3D bila blank) | **SDA=GPIO 6, SCL=GPIO 7** | bus I2C **kedua (Wire1)** — sengaja terpisah dari ADS1115 (bus 8/9); VCC=3.3V |
+| OLED SSD1306 128x32 | I2C 0x3C | **SDA=GPIO 8, SCL=GPIO 9** (satu bus dengan ADS1115) | alamat beda (ADS 0x48 / OLED 0x3C) → aman berbagi; akses diserialkan mutex `i2cMx` |
 | Relay VCC/GND | — | 5V / GND common | — |
 
 Jika pin I2C Anda bukan 8/9, ubah `I2C_SDA` / `I2C_SCL`. Pin OLED diatur di
 `PIN_OLED_SDA` / `PIN_OLED_SCL`.
 
-### Layar OLED SSD1306 128x64
+### Layar OLED SSD1306 (128x32, bus I2C bersama ADS1115)
+
+Panel OLED ditancapkan di **bus Wire yang sama dengan ADS1115** (SDA=GPIO 8,
+SCL=GPIO 9, alamat 0x3C vs ADS 0x48 — berbeda, jadi aman). Akses bus
+diserialkan lewat mutex `i2cMx`: ADS dibaca `taskKontrol`, OLED ditulis
+task `Layar`.
 
 Mesin status di task `Layar` (core 0, prioritas 1, siklus 50 ms):
 
 | Kondisi | Tampilan |
 |---|---|
-| Boot / WiFi putus | Animasi koneksi: ikon WiFi busur naik 0→3 + titik melompat ("WIFI menghubungkan...") |
-| Baru tersambung | **3 detik** (`OLED_SPLASH_MS`): "Sistem Prototype Kebakaran Rumah" + `IP x.x.x.x` |
-| Layar utama — AMAN | Baris 1: nama rumah (meta `name` di RTDB; default DEVICE_ID); baris 2: **AMAN** (FreeSansBold 18pt) |
+| Boot / WiFi putus | Animasi koneksi: ikon WiFi busur naik 0→3 + titik melompat ("WIFI menghubungkan..") |
+| Baru tersambung | **3 detik** (`OLED_SPLASH_MS`): "Sistem Prototype / Kebakaran Rumah" + `IP x.x.x.x` |
+| Layar utama — AMAN | Baris 1: nama rumah (meta `name` di RTDB; default DEVICE_ID); baris 2: **AMAN** (FreeSansBold 12pt) |
 | Layar utama — WASPADA | Jenis bahaya singkat + **WASPADA** berkedip lambat + animasi asap |
 | Layar utama — BAHAYA | Jenis & letak ("API TITIK 2", "SUHU/ASAP/GAS TINGGI" — bergantian tiap 1,2 dtk bila lebih dari satu) + **BAHAYA** besar + animasi api berkedip (saat api) / asap naik |
 

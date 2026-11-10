@@ -183,8 +183,8 @@ graph TB
 | 💧 Relay Sprinkler 3 | **GPIO 12** | Digital Output | relay IN3 |
 | 💧 Relay Sprinkler 4 | **GPIO 13** | Digital Output | relay IN4 |
 | 🌀 Relay Kipas (fan1) | **GPIO 14** | Digital Output | relay IN5 |
-| 📺 OLED SDA (SSD1306 128x64) | **GPIO 6** | I2C Data (Wire1) | bus I2C kedua, terpisah dari ADS1115 |
-| 📺 OLED SCL (SSD1306 128x64) | **GPIO 7** | I2C Clock (Wire1) | addr 0x3C (coba 0x3D bila blank), VCC 3.3V |
+| 📺 OLED SDA (SSD1306) | **GPIO 8** | I2C Data (Wire) | satu bus dengan ADS1115 — alamat beda (0x3C vs 0x48) |
+| 📺 OLED SCL (SSD1306) | **GPIO 9** | I2C Clock (Wire) | akses dibagi mutex `i2cMx` antar FreeRTOS task |
 
 ### ⚡ Logika Output
 
